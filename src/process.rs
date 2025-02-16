@@ -141,6 +141,7 @@ mod tests {
     #[test]
     fn is_finished_if_writers_are_finished() {
         // TODO: Data should look like (timestamp, schema, source, flatbuffer blob) 
+        // Note: Flatbuffers let's us get the source without deserialising the whole thing.
         assert_eq!(false, true);
     }
 }
