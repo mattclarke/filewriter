@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bytemuck = "1.21.0"
 flatbuffers = "25.2.10"
+hdf5 = { package = "hdf5-metno", version = "0.10.1" }
