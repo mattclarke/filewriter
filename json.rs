@@ -48,7 +48,7 @@ fn create_group(parent: &mut hdf5::Group, v: &Value) -> Result<hdf5::Group> {
 fn write_string_dataset(
     parent: &mut hdf5::Group,
     v: &Map<String, Value>,
-) -> Result<String, &'static str> {
+) -> Result<(), &'static str> {
     let name = v["name"].as_str().unwrap();
     let values: hdf5::types::VarLenUnicode = v["values"].as_str().unwrap().parse().unwrap();
     let ds = parent
@@ -56,7 +56,7 @@ fn write_string_dataset(
         .create(name)
         .unwrap();
     ds.write_scalar(&values).unwrap();
-    Ok(name.to_owned())
+    Ok(())
 }
 
 /// Extracts the shapes and values for a (potentially) nested array.
@@ -102,7 +102,7 @@ fn extract_array_details(v: &Value) -> Result<(Vec<usize>, Vec<Number>), &'stati
 fn write_dataset_double(
     parent: &mut hdf5::Group,
     v: &Map<String, Value>,
-) -> Result<String, &'static str> {
+) -> Result<(), &'static str> {
     let name = v["name"].as_str().unwrap();
     if v["values"].is_array() {
         let (shape, values) = extract_array_details(&v["values"]).unwrap();
@@ -119,34 +119,18 @@ fn write_dataset_double(
                 return Err("Static data is limit to maximum of three dimensions");
             }
         }
-
-        //let values: Vec<f64> = v["values"]
-        //    .as_array()
-        //    .unwrap()
-        //    .iter()
-        //    .map(|v| v.as_f64().unwrap())
-        //    .collect();
-        //let ds = parent
-        //    .new_dataset::<T>()
-        //    .shape([values.len()])
-        //    .create(name)
-        //    .unwrap();
-        //ds.write_slice(&values, ..).unwrap();
     } else {
         let values = v["values"].as_f64().unwrap();
         let ds = parent.new_dataset::<f64>().create(name).unwrap();
         ds.write_scalar(&values).unwrap();
     }
-    Ok(name.to_owned())
+    Ok(())
 }
 
 /// Writes int values to the dataset (including arrays upto 3 dimensions).
 ///
 /// Note: writes i32 values as i64 because I am lazy.
-fn write_dataset_int(
-    parent: &mut hdf5::Group,
-    v: &Map<String, Value>,
-) -> Result<String, &'static str> {
+fn write_dataset_int(parent: &mut hdf5::Group, v: &Map<String, Value>) -> Result<(), &'static str> {
     let name = v["name"].as_str().unwrap();
     if v["values"].is_array() {
         let (shape, values) = extract_array_details(&v["values"]).unwrap();
@@ -168,14 +152,13 @@ fn write_dataset_int(
         let ds = parent.new_dataset::<i64>().create(name).unwrap();
         ds.write_scalar(&values).unwrap();
     }
-    Ok(name.to_owned())
+    Ok(())
 }
 
 fn recurse_json(
     parent: &mut hdf5::Group,
     v: &Value,
     depth: usize,
-    path: &mut Vec<String>,
     modules: &mut Vec<ModuleSettings>,
 ) -> Result<(), &'static str> {
     // TODO: links
@@ -185,13 +168,11 @@ fn recurse_json(
             return Err("could not create group");
         };
 
-        path.push(String::from(group.name()));
         if v["children"].is_array() {
             for c in v["children"].as_array().unwrap() {
-                recurse_json(&mut group, c, depth + 1, path, modules);
+                recurse_json(&mut group, c, depth + 1, modules);
             }
         }
-        path.pop();
     } else if v["module"].is_string() && v["module"].as_str().unwrap() == "dataset" {
         let c = v["config"].as_object().unwrap();
         let dtype = c["dtype"].as_str().unwrap();
@@ -208,28 +189,25 @@ fn recurse_json(
         };
 
         // TODO: Can datasets even have children?
-        if let Ok(name) = name {
-            path.push(name);
+        if let Ok(_) = name {
             if v["children"].is_array() {
                 for c in v["children"].as_array().unwrap() {
-                    recurse_json(parent, c, depth + 1, path, modules);
+                    recurse_json(parent, c, depth + 1, modules);
                 }
             }
-            path.pop();
         }
     } else if v["module"].is_string() {
-        let path_s = path.join("/");
         // TODO: check config field exists
         let c = serde_json::to_string(v["config"].as_object().unwrap()).unwrap();
         let module = match v["module"].as_str().unwrap() {
             "f144" => {
                 let mut module: F144Settings = serde_json::from_str(&c).unwrap();
-                module.path = path_s;
+                module.path = parent.name();
                 Some(ModuleSettings::F144(module))
             }
             "ev44" => {
                 let mut module: Ev44Settings = serde_json::from_str(&c).unwrap();
-                module.path = path_s;
+                module.path = parent.name();
                 Some(ModuleSettings::Ev44(module))
             }
             _ => None,
@@ -274,11 +252,9 @@ fn generate_file_contents(
             attr.write_scalar(&avalue).unwrap();
         }
 
-        let mut path = vec![String::from(name)];
-
         if toplevel["children"].is_array() {
             for c in toplevel["children"].as_array().unwrap() {
-                recurse_json(&mut group, c, 0, &mut path, &mut modules);
+                recurse_json(&mut group, c, 0, &mut modules);
             }
         }
     } else {
@@ -288,15 +264,29 @@ fn generate_file_contents(
 }
 
 fn main() {
-    println!("Hello, world!");
-
     let jfile = std::fs::File::open("/home/matthecl/code/scratch/hdf/nxs.json").unwrap();
     let mut hfile = File::create("example.hf").unwrap();
     //let hfile = hdf5::File::with_options().with_fapl(|p| p.core_filebacked(false)).create(&"in_mem").unwrap();
 
     let modules = generate_file_contents(jfile, &mut hfile).unwrap();
 
-    dbg!(modules);
+    dbg!(&modules);
+
+    for m in modules {
+        match m {
+            ModuleSettings::F144(settings) => {
+                let g = hfile.group(&settings.path).unwrap();
+                let ds = g
+                    .new_dataset::<i32>()
+                    .chunk(1024)
+                    .shape(1..)
+                    .create("value")
+                    .unwrap();
+                ds.write_slice(&vec![123], 0..).unwrap();
+            }
+            ModuleSettings::Ev44(_settings) => {}
+        }
+    }
 
     //let builder = group.new_dataset_builder();
     //
@@ -312,38 +302,38 @@ fn main() {
     //ds.resize((2, 5)).unwrap();
     //ds.write_slice(&vec![6, 2, 3, 4, 5], (1, ..,)).unwrap();
     //
-    let g = hfile.create_group("group1");
-    let gg = g.unwrap().create_group("group2");
-
-    let ds = gg
-        .unwrap()
-        .new_dataset::<i32>()
-        .chunk((1, 5))
-        .shape((1.., 5))
-        .create("chunky")
-        .unwrap();
-    ds.write_slice(&vec![1, 2, 3, 4, 5], (0, ..)).unwrap();
-
-    let ds = hfile
-        .dataset("entry/instrument/beam_monitor/depends_on")
-        .unwrap();
-    let ans: hdf5::types::VarLenUnicode = ds.read_scalar().unwrap();
-    println!("value read was {}", ans);
-    //ds.resize((2, 5)).unwrap();
-    //ds.write_slice(&vec![6, 7, 8, 9, 10], (1, ..)).unwrap();
-
-    let gg = hfile.group("group1");
-    let ds = gg
-        .unwrap()
-        .new_dataset::<i32>()
-        .shape(1..)
-        .create("sinvle")
-        .unwrap();
-    ds.write_slice(&vec![123], 0..).unwrap();
-    ds.resize(2).unwrap();
-    ds.write_slice(&vec![245], 1..).unwrap();
-    ds.resize(3).unwrap();
-    ds.write_slice(&vec![345], 2..).unwrap();
+    //let g = hfile.create_group("group1");
+    //let gg = g.unwrap().create_group("group2");
+    //
+    //let ds = gg
+    //    .unwrap()
+    //    .new_dataset::<i32>()
+    //    .chunk((1, 5))
+    //    .shape((1.., 5))
+    //    .create("chunky")
+    //    .unwrap();
+    //ds.write_slice(&vec![1, 2, 3, 4, 5], (0, ..)).unwrap();
+    //
+    //let ds = hfile
+    //    .dataset("entry/instrument/beam_monitor/depends_on")
+    //    .unwrap();
+    //let ans: hdf5::types::VarLenUnicode = ds.read_scalar().unwrap();
+    //println!("value read was {}", ans);
+    ////ds.resize((2, 5)).unwrap();
+    ////ds.write_slice(&vec![6, 7, 8, 9, 10], (1, ..)).unwrap();
+    //
+    //let gg = hfile.group("group1");
+    //let ds = gg
+    //    .unwrap()
+    //    .new_dataset::<i32>()
+    //    .shape(1..)
+    //    .create("sinvle")
+    //    .unwrap();
+    //ds.write_slice(&vec![123], 0..).unwrap();
+    //ds.resize(2).unwrap();
+    //ds.write_slice(&vec![245], 1..).unwrap();
+    //ds.resize(3).unwrap();
+    //ds.write_slice(&vec![345], 2..).unwrap();
 }
 
 #[cfg(test)]
