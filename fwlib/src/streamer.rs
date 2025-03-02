@@ -21,15 +21,19 @@ impl Time for StubWallClock {
     }
 }
 
+trait Writer {
+    fn is_finished(&self) -> bool;
+}
+
 struct Streamer {}
 
 impl Streamer {
     fn process<T: Time>(
         &self,
         source: &mut StubSource,
+        writers: &mut HashMap<String, Box<dyn Writer>>,
         start_time: &SystemTime,
         stop_time: Option<SystemTime>,
-        //writers: &mut HashMap<&str, Writer>,
         wall_clock: &T,
     ) -> bool {
         let Some(message) = source.poll() else {
@@ -38,7 +42,15 @@ impl Streamer {
             }
             return false;
         };
-        false
+
+        if let Some(writer) = writers.get_mut(&message) {
+            let finished = writer.is_finished();
+            if finished {
+                writers.remove(&message);
+            }
+        }
+
+        writers.len() == 0
     }
 }
 
@@ -48,12 +60,22 @@ struct StubSource {
 }
 
 impl StubSource {
-    fn poll(&mut self) -> Option<(String)> {
+    fn poll(&mut self) -> Option<String> {
         let result = self.data.get(self.index);
         if result.is_some() {
             self.index += 1;
         }
         result.cloned()
+    }
+}
+
+struct StubWriter {
+    pub finished: bool,
+}
+
+impl Writer for StubWriter {
+    fn is_finished(&self) -> bool {
+        self.finished
     }
 }
 
@@ -84,8 +106,19 @@ mod tests {
             data: Vec::new(),
             index: 0,
         };
+        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        writers.insert(
+            String::from("writer1"),
+            Box::new(StubWriter { finished: false }),
+        );
 
-        let finished = streamer.process(&mut source, &start_time, stop_time, &wall_clock);
+        let finished = streamer.process(
+            &mut source,
+            &mut writers,
+            &start_time,
+            stop_time,
+            &wall_clock,
+        );
 
         assert_eq!(finished, true);
     }
@@ -100,8 +133,19 @@ mod tests {
             data: Vec::new(),
             index: 0,
         };
+        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        writers.insert(
+            String::from("writer1"),
+            Box::new(StubWriter { finished: false }),
+        );
 
-        let finished = streamer.process(&mut source, &start_time, stop_time, &wall_clock);
+        let finished = streamer.process(
+            &mut source,
+            &mut writers,
+            &start_time,
+            stop_time,
+            &wall_clock,
+        );
 
         assert_eq!(finished, false);
     }
@@ -116,8 +160,19 @@ mod tests {
             data: Vec::new(),
             index: 0,
         };
+        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        writers.insert(
+            String::from("writer1"),
+            Box::new(StubWriter { finished: false }),
+        );
 
-        let finished = streamer.process(&mut source, &start_time, stop_time, &wall_clock);
+        let finished = streamer.process(
+            &mut source,
+            &mut writers,
+            &start_time,
+            stop_time,
+            &wall_clock,
+        );
 
         assert_eq!(finished, false);
     }
@@ -132,16 +187,95 @@ mod tests {
             data: vec!["data".to_owned()],
             index: 0,
         };
+        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        writers.insert(
+            String::from("writer1"),
+            Box::new(StubWriter { finished: false }),
+        );
 
-        let finished = streamer.process(&mut source, &start_time, stop_time, &wall_clock);
+        let finished = streamer.process(
+            &mut source,
+            &mut writers,
+            &start_time,
+            stop_time,
+            &wall_clock,
+        );
 
         assert_eq!(finished, false);
     }
 
     #[test]
-    fn is_finished_if_writers_are_finished() {
-        // TODO: Data should look like (timestamp, schema, source, flatbuffer blob) 
-        // Note: Flatbuffers let's us get the source without deserialising the whole thing.
-        assert_eq!(false, true);
+    fn is_finished_if_all_writers_are_finished() {
+        let wall_clock = generate_wall_clock(vec![1000]);
+        let start_time = to_system_time(0);
+        let stop_time = Some(to_system_time(2000));
+        let streamer = Streamer {};
+        let mut source = StubSource {
+            data: vec!["writer1".to_owned(), "writer2".to_owned()],
+            index: 0,
+        };
+        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        writers.insert(
+            String::from("writer1"),
+            Box::new(StubWriter { finished: true }),
+        );
+        writers.insert(
+            String::from("writer2"),
+            Box::new(StubWriter { finished: true }),
+        );
+
+        // Process first message to stop writer 1
+        let _ = streamer.process(
+            &mut source,
+            &mut writers,
+            &start_time,
+            stop_time,
+            &wall_clock,
+        );
+
+        // Process second message to stop writer 2
+        let finished = streamer.process(
+            &mut source,
+            &mut writers,
+            &start_time,
+            stop_time,
+            &wall_clock,
+        );
+
+        assert_eq!(finished, true);
     }
+
+    #[test]
+    fn is_not_finished_if_one_writers_is_not_finished() {
+        let wall_clock = generate_wall_clock(vec![1000]);
+        let start_time = to_system_time(0);
+        let stop_time = Some(to_system_time(2000));
+        let streamer = Streamer {};
+        let mut source = StubSource {
+            data: vec!["writer1".to_owned(), "writer2".to_owned()],
+            index: 0,
+        };
+        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        writers.insert(
+            String::from("writer1"),
+            Box::new(StubWriter { finished: true }),
+        );
+        writers.insert(
+            String::from("writer2"),
+            Box::new(StubWriter { finished: false }),
+        );
+
+        let finished = streamer.process(
+            &mut source,
+            &mut writers,
+            &start_time,
+            stop_time,
+            &wall_clock,
+        );
+
+        assert_eq!(finished, false);
+    }
+
+    // TODO: writers hashmap key should be (source, schema)
+    // Replace fake data with ev44 data with appropriate sources
 }
