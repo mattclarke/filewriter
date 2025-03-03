@@ -1,5 +1,6 @@
 mod ev44;
 mod ev44_events_generated;
+mod hdf;
 pub mod streamer;
 pub mod template;
 mod utils;

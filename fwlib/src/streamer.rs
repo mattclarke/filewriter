@@ -308,7 +308,5 @@ mod tests {
 
         assert_eq!(finished, false);
     }
-
-    // TODO: writers hashmap key should be (source, schema)
-    // Replace fake data with ev44 data with appropriate sources
 }
+// TODO: create a combined type for streamer and source?

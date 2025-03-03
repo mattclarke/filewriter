@@ -32,46 +32,34 @@ impl Ev44<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ev44_events_generated::{Event44Message, Event44MessageArgs};
-
     use super::*;
-
-    fn create_flatbuffer() -> Vec<u8> {
-        let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-        let source = builder.create_string("SomeSource");
-
-        let reference_times = vec![123456_i64];
-        let reference_time_offset = builder.create_vector(&reference_times);
-        let reference_index_offset = builder.create_vector(&vec![0_i32]);
-
-        let tof_offset = builder.create_vector(&vec![100, 200, 300]);
-        let pixels_offset = builder.create_vector(&vec![1, 2, 3]);
-
-        let ev44 = Event44Message::create(
-            &mut builder,
-            &Event44MessageArgs {
-                source_name: Some(source),
-                message_id: 123,
-                reference_time: Some(reference_time_offset),
-                reference_time_index: Some(reference_index_offset),
-                time_of_flight: Some(tof_offset),
-                pixel_id: Some(pixels_offset),
-            },
-        );
-        builder.finish(ev44, Some("ev44"));
-        builder.finished_data().to_vec()
-    }
+    use crate::{
+        ev44_events_generated::{Event44Message, Event44MessageArgs},
+        utils::create_ev44_flatbuffer,
+    };
 
     #[test]
     fn can_get_source_from_ev44() {
-        let buf = create_flatbuffer();
+        let buf = create_ev44_flatbuffer(
+            "SomeSource",
+            &vec![12345],
+            &vec![0],
+            &vec![100, 200, 300],
+            &vec![1, 2, 3],
+        );
 
         assert_eq!(Ev44::get_source(&buf.as_slice()), "SomeSource");
     }
 
     #[test]
     fn extract_ev44() {
-        let buf = create_flatbuffer();
+        let buf = create_ev44_flatbuffer(
+            "SomeSource",
+            &vec![12345],
+            &vec![0],
+            &vec![100, 200, 300],
+            &vec![1, 2, 3],
+        );
 
         let ev44 = Ev44::new(&buf.as_slice());
 
