@@ -1,18 +1,19 @@
-use ev44_events_generated::{root_as_event_44_message, Event44Message, Event44MessageArgs};
+use crate::ev44_events_generated::{Event44Message, Event44MessageArgs};
 
-mod ev44;
-mod ev44_events_generated;
-
-fn create_ev44_flatbuffer() -> Vec<u8> {
+pub fn create_ev44_flatbuffer(
+    source: &str,
+    reference_times: &Vec<i64>,
+    reference_index_offset: &Vec<i32>,
+    time_of_flight: &Vec<i32>,
+    pixel_ids: &Vec<i32>,
+) -> Vec<u8> {
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-    let source = builder.create_string("SomeSource");
 
-    let reference_times = vec![123456_i64];
+    let source = builder.create_string(source);
     let reference_time_offset = builder.create_vector(&reference_times);
-    let reference_index_offset = builder.create_vector(&vec![0_i32]);
-
-    let tof_offset = builder.create_vector(&vec![100, 200, 300, 4000, 50000]);
-    let pixels_offset = builder.create_vector(&vec![1, 2, 3]);
+    let reference_index_offset = builder.create_vector(&reference_index_offset);
+    let tof_offset = builder.create_vector(&time_of_flight);
+    let pixels_offset = builder.create_vector(&pixel_ids);
 
     let ev44 = Event44Message::create(
         &mut builder,

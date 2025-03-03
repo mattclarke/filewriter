@@ -1,4 +1,5 @@
-use std::{cell::RefCell, collections::HashMap, time::SystemTime};
+use crate::ev44::Ev44;
+use std::{cell::RefCell, collections::HashMap, str::from_utf8, time::SystemTime};
 
 trait Time {
     fn now(&self) -> SystemTime;
@@ -25,13 +26,22 @@ trait Writer {
     fn is_finished(&self) -> bool;
 }
 
+struct SchemaError;
+
 struct Streamer {}
 
 impl Streamer {
+    fn extract_source(schema: &str, message: &[u8]) -> Result<String, SchemaError> {
+        match schema {
+            "ev44" => Ok(Ev44::get_source(&message)),
+            _ => Err(SchemaError {}),
+        }
+    }
+
     fn process<T: Time>(
         &self,
         source: &mut StubSource,
-        writers: &mut HashMap<String, Box<dyn Writer>>,
+        writers: &mut HashMap<(String, String), Box<dyn Writer>>,
         start_time: &SystemTime,
         stop_time: Option<SystemTime>,
         wall_clock: &T,
@@ -43,10 +53,22 @@ impl Streamer {
             return false;
         };
 
-        if let Some(writer) = writers.get_mut(&message) {
+        let Ok(schema) = from_utf8(&message[4..8]) else {
+            // TODO: log that couldn't get schema then ignore
+            return false;
+        };
+
+        let Ok(source) = Self::extract_source(&schema, &message) else {
+            // TODO: log that couldn't get source then ignore
+            return false;
+        };
+
+        let key = (schema.to_owned(), source);
+
+        if let Some(writer) = writers.get_mut(&key) {
             let finished = writer.is_finished();
             if finished {
-                writers.remove(&message);
+                writers.remove(&key);
             }
         }
 
@@ -55,12 +77,12 @@ impl Streamer {
 }
 
 struct StubSource {
-    data: Vec<String>,
+    data: Vec<Vec<u8>>,
     index: usize,
 }
 
 impl StubSource {
-    fn poll(&mut self) -> Option<String> {
+    fn poll(&mut self) -> Option<Vec<u8>> {
         let result = self.data.get(self.index);
         if result.is_some() {
             self.index += 1;
@@ -81,9 +103,20 @@ impl Writer for StubWriter {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::utils::*;
     use std::time::Duration;
 
-    use super::*;
+    fn create_ev44(source: &str) -> Vec<u8> {
+        create_ev44_flatbuffer(
+            source,
+            &vec![100],
+            &vec![0],
+            &vec![10, 20, 30, 40, 50],
+            &vec![1, 2, 3, 4, 5],
+        )
+    }
+
     fn to_system_time(input: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(input)
     }
@@ -106,9 +139,9 @@ mod tests {
             data: Vec::new(),
             index: 0,
         };
-        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        let mut writers: HashMap<(String, String), Box<dyn Writer>> = HashMap::new();
         writers.insert(
-            String::from("writer1"),
+            ("ev44".to_owned(), "source1".to_owned()),
             Box::new(StubWriter { finished: false }),
         );
 
@@ -133,9 +166,9 @@ mod tests {
             data: Vec::new(),
             index: 0,
         };
-        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        let mut writers: HashMap<(String, String), Box<dyn Writer>> = HashMap::new();
         writers.insert(
-            String::from("writer1"),
+            ("ev44".to_owned(), "source1".to_owned()),
             Box::new(StubWriter { finished: false }),
         );
 
@@ -160,9 +193,9 @@ mod tests {
             data: Vec::new(),
             index: 0,
         };
-        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        let mut writers: HashMap<(String, String), Box<dyn Writer>> = HashMap::new();
         writers.insert(
-            String::from("writer1"),
+            ("ev44".to_owned(), "source1".to_owned()),
             Box::new(StubWriter { finished: false }),
         );
 
@@ -184,12 +217,12 @@ mod tests {
         let stop_time = Some(to_system_time(2000));
         let streamer = Streamer {};
         let mut source = StubSource {
-            data: vec!["data".to_owned()],
+            data: vec![create_ev44("source1").to_owned()],
             index: 0,
         };
-        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        let mut writers: HashMap<(String, String), Box<dyn Writer>> = HashMap::new();
         writers.insert(
-            String::from("writer1"),
+            ("ev44".to_owned(), "source1".to_owned()),
             Box::new(StubWriter { finished: false }),
         );
 
@@ -211,16 +244,16 @@ mod tests {
         let stop_time = Some(to_system_time(2000));
         let streamer = Streamer {};
         let mut source = StubSource {
-            data: vec!["writer1".to_owned(), "writer2".to_owned()],
+            data: vec![create_ev44("source1").to_owned(), create_ev44("source2")],
             index: 0,
         };
-        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        let mut writers: HashMap<(String, String), Box<dyn Writer>> = HashMap::new();
         writers.insert(
-            String::from("writer1"),
+            ("ev44".to_owned(), "source1".to_owned()),
             Box::new(StubWriter { finished: true }),
         );
         writers.insert(
-            String::from("writer2"),
+            ("ev44".to_owned(), "source2".to_owned()),
             Box::new(StubWriter { finished: true }),
         );
 
@@ -252,16 +285,16 @@ mod tests {
         let stop_time = Some(to_system_time(2000));
         let streamer = Streamer {};
         let mut source = StubSource {
-            data: vec!["writer1".to_owned(), "writer2".to_owned()],
+            data: vec![create_ev44("source1").to_owned(), create_ev44("source2")],
             index: 0,
         };
-        let mut writers: HashMap<String, Box<dyn Writer>> = HashMap::new();
+        let mut writers: HashMap<(String, String), Box<dyn Writer>> = HashMap::new();
         writers.insert(
-            String::from("writer1"),
+            ("ev44".to_owned(), "source1".to_owned()),
             Box::new(StubWriter { finished: true }),
         );
         writers.insert(
-            String::from("writer2"),
+            ("ev44".to_owned(), "source2".to_owned()),
             Box::new(StubWriter { finished: false }),
         );
 

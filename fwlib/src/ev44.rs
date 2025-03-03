@@ -3,14 +3,14 @@ use flatbuffers::Vector;
 
 use crate::ev44_events_generated::root_as_event_44_message;
 
-struct Ev44<'a> {
+pub struct Ev44<'a> {
     source: String,
     message_id: i64,
     reference_time: Vector<'a, i64>,
 }
 
 impl Ev44<'_> {
-    fn get_source(buf: &[u8]) -> String {
+    pub fn get_source(buf: &[u8]) -> String {
         let root = root_as_event_44_message(buf).unwrap();
         root.source_name().to_string()
     }
